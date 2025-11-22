@@ -1,0 +1,151 @@
+using UnityEngine;
+using UnityEngine.InputSystem;
+
+[RequireComponent(typeof(CharacterController))]
+public class PlayerController : MonoBehaviour
+{
+    [Header("Movement Settings")]
+    public float moveSpeed = 6f;
+    public float jumpHeight = 2f;
+
+    [Header("Ground Check")]
+    public Transform groundCheck, headCheck;
+    public float groundDistance = 0.3f;
+    public LayerMask groundMask, deathMask;
+    public float jumpCoolDownTimer = 0.3f;
+
+    private Animator anim;
+    private CharacterController controller;
+    private InputSystem_Actions inputs;
+    private Vector2 moveInput;
+    private Vector3 velocity;
+
+    private bool isGrounded,isOnDeathLayer, gameFail;
+    private bool canDoubleJump;
+    private float timer;
+    float gravityFactor = 3f;
+    private void Awake()
+    {
+        controller = GetComponent<CharacterController>();
+        anim = GetComponentInChildren<Animator>();
+        inputs = new InputSystem_Actions();
+
+        inputs.Player.Move.performed += ctx => moveInput = ctx.ReadValue<Vector2>();
+        inputs.Player.Move.canceled += ctx => moveInput = Vector2.zero;
+
+        inputs.Player.Jump.performed += ctx => Jump();
+    }
+
+    private void OnEnable()
+    {
+        inputs.Enable();
+    }
+    private void OnDisable() => inputs.Disable();
+
+    private void Update()
+    {
+        if (gameFail)
+            return;
+
+        GroundCheck();
+        HeadChecker();
+        HandleMovement();
+
+        ApplyGravity();
+    }
+
+    private void GroundCheck()
+    {
+        isGrounded = Physics.CheckSphere(groundCheck.position, groundDistance, groundMask);
+        isOnDeathLayer = Physics.CheckSphere(groundCheck.position, groundDistance, deathMask);
+        
+        if (isOnDeathLayer)
+        {
+            PlayerHealth.PlayerHit?.Invoke(10000);
+            isOnDeathLayer = false;
+            gameFail = true;
+            return;
+        }
+        if (isGrounded)
+        {
+            timer = 0;
+            // Reset double jump when grounded
+            canDoubleJump = true;
+            if (velocity.y < 0)
+                velocity.y = -2f; // small downward force to keep grounded
+        }
+        else
+        {
+            timer += Time.deltaTime;
+        }
+    }
+
+    private bool HeadChecker()
+    {
+        if (Physics.CheckSphere(headCheck.position, groundDistance))
+        {
+            gravityFactor = 6f;
+            return true;
+        }
+        gravityFactor = 3f;
+        return false;
+    }
+
+    private void ApplyGravity()
+    {
+        velocity.y += gravityFactor * Physics.gravity.y * Time.deltaTime;
+        controller.Move(velocity * Time.deltaTime);
+    }
+    private void HandleMovement()
+    {
+        Vector3 move = new Vector3(moveInput.x, 0, 0); // Only move on X-axis for side scroller
+        controller.Move(move * moveSpeed * Time.deltaTime);
+        velocity.x = controller.velocity.x;
+
+        // Rotate the player to face movement direction
+        RotatePlayer(move);
+
+        if (anim)
+            Utility.SetAnimation(anim, Utility.AnimationStates.MoveX, Mathf.Abs(velocity.x));
+    }
+
+    private void RotatePlayer(Vector3 move)
+    {
+        // If moving right
+        if (move.x > 0.1f)
+            transform.rotation = Quaternion.Euler(0, 90f, 0);  // face right
+
+        // If moving left
+        else if (move.x < -0.1f)
+            transform.rotation = Quaternion.Euler(0, -90f, 0); // face left
+    }
+
+
+    private void Jump()
+    {
+        if (isGrounded)
+        {
+            // Normal jump
+            velocity.y = Mathf.Sqrt(jumpHeight * -Physics.gravity.y);
+            canDoubleJump = true; // allow one double jump after first
+            AudioManager.Instance.PlayJumpSound();
+        }
+        else if (canDoubleJump)
+        {
+            if (timer >= jumpCoolDownTimer)
+            {
+                return;
+            }
+
+            // Double jump
+            velocity.y = Mathf.Sqrt(jumpHeight * -Physics.gravity.y);
+            canDoubleJump = false; // disable further jumps until grounded
+            AudioManager.Instance.PlayJumpSound();
+        }
+        if (anim)
+            anim.SetLayerWeight(1, 1);
+
+    }
+
+}
+
